@@ -26,6 +26,9 @@ async def main():
             tools = await session.list_tools()
             print("Available tools:",tools)
 
+            result = await session.call_tool("process",arguments={"path":"/path/to/data"})
+            print("result:",result)
+
 
 
 if __name__ == "__main__":

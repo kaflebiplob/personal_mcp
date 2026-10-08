@@ -11,9 +11,9 @@ def fetch():
 
 
 @mcp.tool()
-def process():
+def process(path:str):
 
-    return {"data": "Hello, MCP Process here!!"}
+    return {"data": "Hello, MCP Process here!!" + path}
 
 
 if __name__ == "__main__":
