@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 import httpx
@@ -38,6 +39,7 @@ TEXT_SUFFIXES = {
 }
 MAX_NOTE_CHARS = 5000
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+GITHUB_API = os.environ.get("GITHUB_API", "https://api.github.com").rstrip("/")
 
 LOG_PATH = Path(__file__).parent / "logs" / "tools.log"
 LOG_PATH.parent.mkdir(exist_ok=True)
@@ -72,7 +74,11 @@ def format_note(r) -> str:
     return f"#{r['id']} [{r['created_at']:%Y-%m-%d %H:%M}] {r['content']}"
 
 
-init_db()
+try:
+
+    init_db()
+except Exception as exc:
+    print(f"WARNING: database init failed: {exc}", sys.stderr)
 
 
 def logged(fn):
@@ -119,7 +125,7 @@ def logged(fn):
                 )
                 raise
             audit.info(
-                "ok %s(%s) %0fms",
+                "ok %s(%s) %.0fms",
                 fn.__name__,
                 describe(args, kwargs),
                 (time.perf_counter() - start) * 1000,
@@ -269,10 +275,9 @@ def github_headers() -> dict[str, str]:
 async def list_repos(limit: int = 20) -> list[str]:
     """List Github repositories the token can access."""
     limit = max(1, min(limit, 50))
-    github_api = os.environ.get("GITHUB_API")
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
-            f"{github_api}/user/repos",
+            f"{GITHUB_API}/user/repos",
             headers=github_headers(),
             params={"sort": "updated", "per_page": limit},
         )
@@ -292,19 +297,19 @@ async def list_issues(repo: str, limit: int = 10) -> list[str]:
         raise ValueError("Repo must look like owner/name")
 
     limit = max(1, min(limit, 30))
-    github_api = os.environ.get("GITHUB_API")
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
-            f"{github_api}/repos/{repo}/issues",
+            f"{GITHUB_API}/repos/{repo}/issues",
             headers=github_headers(),
             params={"state": "open", "per_page": limit},
         )
         resp.raise_for_status()
-    return [
+    issues = [
         f"#{i['number']} {i['title']} (by {i['user']['login']})"
         for i in resp.json()
         if "pull_request" not in i
     ]
+    return issues or ["No open issues."]
 
 
 @mcp.tool()
