@@ -9,7 +9,7 @@ async def call(session, name, args):
     result = await session.call_tool(name, args)
     text = " | ".join(c.text for c in result.content)
     status = "ERROR" if result.isError else "ok"
-    print(f"[{status}]{name}{args}\n  ->{text}\n")
+    print(f"[{status}] {name}({args})\n    -> {text}\n")
 
 
 async def main():
@@ -20,7 +20,7 @@ async def main():
             print("Tools:", [t.name for t in tools.tools], "\n")
 
             await call(session, "list_files", {})
-            await call(session, "read_files", {"path": "hello.txt"})
+            await call(session, "read_file", {"path": "hello.txt"})
             await call(session, "search_text", {"query": "mcp"})
 
             await call(session, "read_file", {"path": "../pyproject.toml"})

@@ -1,10 +1,11 @@
 import os
 from pathlib import Path
+
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("personal-mcp")
 
-
+# The ONLY folder the tools are allowed to touch
 WORKSPACE = Path(
     os.environ.get("MCP_WORKSPACE", Path(__file__).parent / "workspace")
 ).resolve()
@@ -26,16 +27,16 @@ TEXT_SUFFIXES = {
 
 
 def safe_path(relative: str) -> Path:
-    """Turn a user-given into a real path, refusing anything outside WORKSPACE."""
-    candidate = (WORKSPACE / relative).resolve()
-    if not candidate.is_relative_to(candidate):
+    """Turn a user-given path into a real path, refusing anything outside WORKSPACE."""
+    candidate = (WORKSPACE / relative).resolve()  # resolves ../ and symlinks
+    if not candidate.is_relative_to(WORKSPACE):
         raise ValueError("Path is outside the authorized workspace")
     return candidate
 
 
 @mcp.tool()
 def ping() -> str:
-    """Health check: confirms the server is still alive."""
+    """Health check: confirms the server is alive."""
     return "pong"
 
 
@@ -50,28 +51,27 @@ def list_files(subdir: str = ".") -> list[str]:
     """List files and folders in the workspace (or a subfolder of it)."""
     base = safe_path(subdir)
     if not base.is_dir():
-        raise ValueError(f"Not a folder")
-
+        raise ValueError(f"Not a folder: {subdir}")
     return sorted(
-        str(p.related_to(WORKSPACE) + ("/") if p.is_dir() else "")
+        str(p.relative_to(WORKSPACE)) + ("/" if p.is_dir() else "")
         for p in base.iterdir()
     )
 
 
 @mcp.tool()
-def read_files(path: str) -> str:
+def read_file(path: str) -> str:
     """Read a text file from the workspace."""
     file = safe_path(path)
     if not file.is_file():
         raise ValueError(f"Not a file: {path}")
     if file.stat().st_size > MAX_READ_BYTES:
-        raise ValueError("file is too large to read")
+        raise ValueError("File is too large to read")
     return file.read_text(encoding="utf-8", errors="replace")
 
 
 @mcp.tool()
-def search_tools(query: str, subdir: str = ".") -> list[str]:
-    """search text files in the workspace for a word or phrase (case-insensitive)"""
+def search_text(query: str, subdir: str = ".") -> list[str]:
+    """Search text files in the workspace for a word or phrase (case-insensitive)."""
     base = safe_path(subdir)
     q = query.lower()
     results: list[str] = []
@@ -81,14 +81,13 @@ def search_tools(query: str, subdir: str = ".") -> list[str]:
         try:
             if not file.resolve().is_relative_to(WORKSPACE):
                 continue
-            text = file.resolve().is_relative_to(WORKSPACE)
+            text = file.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-
-        for number, line in enumerate(text.splitness(), 1):
+        for number, line in enumerate(text.splitlines(), 1):
             if q in line.lower():
                 results.append(
-                    f"{file.relative_to(WORKSPACE)}:{number}:{line.strip()[:200]}"
+                    f"{file.relative_to(WORKSPACE)}:{number}: {line.strip()[:200]}"
                 )
                 if len(results) >= MAX_RESULTS:
                     return results
