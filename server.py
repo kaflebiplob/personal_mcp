@@ -115,7 +115,7 @@ def search_text(query: str, subdir: str = ".") -> list[str]:
 
 
 @mcp.tool()
-def add_notes(content: str) -> str:
+def add_note(content: str) -> str:
     """Save a note to personal memory."""
     content = content.strip()
     if not content:
@@ -125,6 +125,40 @@ def add_notes(content: str) -> str:
     with closing(db()) as conn, conn:
         cur = conn.execute("INSERT INTO notes (content) VALUES (?)", (content,))
         return f"Saved note #{cur.lastrowid}"
+
+
+@mcp.tool()
+def list_notes(limit: int = 20) -> list[str]:
+    """List the most recent notes (newest note first)"""
+    limit = max(1, min(limit, 100))
+    with closing(db()) as conn:
+        rows = conn.execute(
+            "SELECT id, content, created_at FROM notes ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [f"#{r['id']} [{r['created_at']}] {r['content']}" for r in rows]
+
+
+@mcp.tool()
+def search_notes(query: str) -> list[str]:
+    """Search saved notes for a word or phrase."""
+    with closing(db()) as conn:
+        rows = conn.execute(
+            "SELECT id,content,created_at FROM notes "
+            "WHERE content LIKE ? ORDER BY id DESC LIMIT 50",
+            (f"%{query}%",),
+        ).fetchall()
+    return [f"#{r['id']} [{r['created_at']}] {r['content']}" for r in rows]
+
+
+@mcp.tool()
+def delete_note(note_id: int) -> str:
+    """Delete a note  by its id number."""
+    with closing(db()) as conn, conn:
+        cur = conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+        if cur.rowcount == 0:
+            raise ValueError(f"No note with id {note_id}")
+    return f"Deleted note #{note_id}"
 
 
 if __name__ == "__main__":

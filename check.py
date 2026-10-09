@@ -26,5 +26,11 @@ async def main():
             await call(session, "read_file", {"path": "../pyproject.toml"})
             await call(session, "read_file", {"path": "/etc/passwd"})
 
+            await call(session, "add_note", {"content": "My first note"})
+            await call(session, "list_notes", {})
+            await call(session, "search_notes", {"query": "first"})
+            await call(session, "delete_note", {"note_id": 1})
+            await call(session, "list_notes", {})
+
 
 asyncio.run(main())
