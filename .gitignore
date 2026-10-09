@@ -9,3 +9,5 @@ memory.db
 memory.db*
 .env
 logs/
+workspace/
+workspace/*
