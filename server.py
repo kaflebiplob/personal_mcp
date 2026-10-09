@@ -16,6 +16,15 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+# This function is to protect from AI (Which can automatically delete notes)
+
+READ_ONLY = os.environ.get("MCP_READ_ONLY","").lower() in {"1","true","yes"}
+
+def require_write()->None:
+    """Call at the start of any tool that change data."""
+    if READ_ONLY:
+        raise PermissionError("Server is in read-only mode.")
+
 mcp = FastMCP("personal-mcp")
 
 # The ONLY folder the tools are allowed to touch
@@ -78,7 +87,7 @@ try:
 
     init_db()
 except Exception as exc:
-    print(f"WARNING: database init failed: {exc}", sys.stderr)
+    print(f"WARNING: database init failed: {type(exc).__name__}", file=sys.stderr)
 
 
 def logged(fn):
@@ -252,6 +261,7 @@ def search_notes(query: str) -> list[str]:
 @logged
 def delete_note(note_id: int) -> str:
     """Delete a note  by its id number."""
+    require_write()
     with db() as conn:
         cur = conn.execute("DELETE FROM notes WHERE id = %s", (note_id,))
         if cur.rowcount == 0:
