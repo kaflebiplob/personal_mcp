@@ -5,6 +5,11 @@ import httpx
 import re
 import psycopg
 from psycopg.rows import dict_row
+import functools
+import inspect
+import logging
+import time
+
 
 from dotenv import load_dotenv
 
@@ -34,6 +39,16 @@ TEXT_SUFFIXES = {
 MAX_NOTE_CHARS = 5000
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
+LOG_PATH = Path(__file__).parent / "logs" / "tools.log"
+LOG_PATH.parent.mkdir(exist_ok=True)
+
+audit = logging.getLogger("audit")
+audit.setLevel(logging.INFO)
+audit.propagate = False
+_handler = logging.FileHandler(LOG_PATH)
+_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+audit.addHandler(_handler)
+
 
 def db() -> psycopg.Connection:
     url = os.environ.get("MCP_DATABASE_URL")
@@ -60,6 +75,60 @@ def format_note(r) -> str:
 init_db()
 
 
+def logged(fn):
+    def describe(args, kwargs):
+        parts = [repr(a) for a in args] + [f"{k}={v!r}" for k, v in kwargs.items()]
+        return ", ".join(parts)[:200]
+
+    if inspect.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            try:
+                result = await fn(*args, **kwargs)
+            except Exception as exc:
+                audit.info(
+                    "ERROR %s(%s) -> %s",
+                    fn.__name__,
+                    describe(args, kwargs),
+                    type(exc).__name__,
+                )
+                raise
+            audit.info(
+                "ok %s(%s) %0fms",
+                fn.__name__,
+                describe(args, kwargs),
+                (time.perf_counter() - start) * 1000,
+            )
+            return result
+
+    else:
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            try:
+                result = fn(*args, **kwargs)
+            except Exception as exc:
+                audit.info(
+                    "ERROR %s(%s) -> %s",
+                    fn.__name__,
+                    describe(args, kwargs),
+                    type(exc).__name__,
+                )
+                raise
+            audit.info(
+                "ok %s(%s) %0fms",
+                fn.__name__,
+                describe(args, kwargs),
+                (time.perf_counter() - start) * 1000,
+            )
+            return result
+
+    return wrapper
+
+
 def safe_path(relative: str) -> Path:
     """Turn a user-given path into a real path, refusing anything outside WORKSPACE."""
     candidate = (WORKSPACE / relative).resolve()
@@ -81,6 +150,7 @@ def add(a: float, b: float) -> float:
 
 
 @mcp.tool()
+@logged
 def list_files(subdir: str = ".") -> list[str]:
     """List files and folders in the workspace (or a subfolder of it)."""
     base = safe_path(subdir)
@@ -93,6 +163,7 @@ def list_files(subdir: str = ".") -> list[str]:
 
 
 @mcp.tool()
+@logged
 def read_file(path: str) -> str:
     """Read a text file from the workspace."""
     file = safe_path(path)
@@ -104,6 +175,7 @@ def read_file(path: str) -> str:
 
 
 @mcp.tool()
+@logged
 def search_text(query: str, subdir: str = ".") -> list[str]:
     """Search text files in the workspace for a word or phrase (case-insensitive)."""
     base = safe_path(subdir)
@@ -129,6 +201,7 @@ def search_text(query: str, subdir: str = ".") -> list[str]:
 
 
 @mcp.tool()
+@logged
 def add_note(content: str) -> str:
     """Save a note to personal memory."""
     content = content.strip()
@@ -144,6 +217,7 @@ def add_note(content: str) -> str:
 
 
 @mcp.tool()
+@logged
 def list_notes(limit: int = 20) -> list[str]:
     """List the most recent notes (newest note first)"""
     limit = max(1, min(limit, 100))
@@ -156,6 +230,7 @@ def list_notes(limit: int = 20) -> list[str]:
 
 
 @mcp.tool()
+@logged
 def search_notes(query: str) -> list[str]:
     """Search saved notes for a word or phrase."""
     with db() as conn:
@@ -168,6 +243,7 @@ def search_notes(query: str) -> list[str]:
 
 
 @mcp.tool()
+@logged
 def delete_note(note_id: int) -> str:
     """Delete a note  by its id number."""
     with db() as conn:
@@ -189,6 +265,7 @@ def github_headers() -> dict[str, str]:
 
 
 @mcp.tool()
+@logged
 async def list_repos(limit: int = 20) -> list[str]:
     """List Github repositories the token can access."""
     limit = max(1, min(limit, 50))
@@ -208,6 +285,7 @@ async def list_repos(limit: int = 20) -> list[str]:
 
 
 @mcp.tool()
+@logged
 async def list_issues(repo: str, limit: int = 10) -> list[str]:
     """List open issues in a Github repo. Use the owner name"""
     if not REPO_PATTERN.match(repo):
@@ -230,6 +308,7 @@ async def list_issues(repo: str, limit: int = 10) -> list[str]:
 
 
 @mcp.tool()
+@logged
 async def get_weather(city: str) -> str:
     """Get the current weather for a city (uses the free open-meteo service)."""
     city = city.strip()
