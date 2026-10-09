@@ -178,7 +178,9 @@ def list_files(subdir: str = ".") -> list[str]:
     """
     base = safe_path(subdir)
     if not base.is_dir():
-        raise ValueError(f"Not a folder: {subdir}")
+        raise ValueError(
+            f"Not a folder: {subdir}. Call list_files with subdir = '.' to see what exists."
+        )
     return sorted(
         str(p.relative_to(WORKSPACE)) + ("/" if p.is_dir() else "")
         for p in base.iterdir()
@@ -196,7 +198,7 @@ def read_file(path: str) -> str:
     """
     file = safe_path(path)
     if not file.is_file():
-        raise ValueError(f"Not a file: {path}")
+        raise ValueError(f"Not a file: {path}. Call list_files to see what exists.")
     if file.stat().st_size > MAX_READ_BYTES:
         raise ValueError("File is too large to read")
     return file.read_text(encoding="utf-8", errors="replace")
@@ -231,6 +233,9 @@ def search_text(query: str, subdir: str = ".") -> list[str]:
                     f"{file.relative_to(WORKSPACE)}:{number}: {line.strip()[:200]}"
                 )
                 if len(results) >= MAX_RESULTS:
+                    results.append(
+                        f"(stopped at {MAX_RESULTS} matches, narrow your search.)"
+                    )
                     return results
     return results
 
@@ -310,7 +315,9 @@ def delete_note(note_id: int) -> str:
     with db() as conn:
         cur = conn.execute("DELETE FROM notes WHERE id = %s", (note_id,))
         if cur.rowcount == 0:
-            raise ValueError(f"No note with id {note_id}")
+            raise ValueError(
+                f"No note with id {note_id}. Call list_notes to see current ids."
+            )
     return f"Deleted note #{note_id}"
 
 
@@ -353,7 +360,7 @@ async def list_repos(limit: int = 20) -> list[str]:
 async def list_issues(repo: str, limit: int = 10) -> list[str]:
     """List open issues in one GitHub repository (pull requests are excluded).
 
-    Args:
+    Args:l
         repo: Repository in owner/name format, e.g. "kaflebiplob/ecommerce_py".
         limit: How many issues to return (1 to 30).
     """
