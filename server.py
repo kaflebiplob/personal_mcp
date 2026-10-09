@@ -4,6 +4,10 @@ from mcp.server.fastmcp import FastMCP
 import sqlite3
 from contextlib import closing
 import httpx
+import re
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env")
 
 mcp = FastMCP("personal-mcp")
 
@@ -27,6 +31,7 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 MAX_NOTE_CHARS = 5000
+REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 DB_PATH = Path(__file__).parent / "memory.db"
 
@@ -160,6 +165,58 @@ def delete_note(note_id: int) -> str:
         if cur.rowcount == 0:
             raise ValueError(f"No note with id {note_id}")
     return f"Deleted note #{note_id}"
+
+
+def github_headers() -> dict[str, str]:
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise ValueError("Github token is not set, please check .env file")
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-Github-Api-Version": "2022-11-28",
+    }
+
+
+@mcp.tool()
+async def list_repos(limit: int = 20) -> list[str]:
+    """List Github repositories the token can access."""
+    limit = max(1, min(limit, 50))
+    github_api = os.environ.get("GITHUB_API")
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{github_api}/user/repos",
+            headers=github_headers(),
+            params={"sort": "updated", "per_page": limit},
+        )
+        resp.raise_for_status()
+    return [
+        f"{r['full_name']} ({'private' if r['private'] else 'public'})"
+        f"- {r.get('description') or 'no description'}"
+        for r in resp.json()
+    ]
+
+
+@mcp.tool()
+async def list_issues(repo: str, limit: int = 10) -> list[str]:
+    """List open issues in a Github repo. Use the owner name"""
+    if not REPO_PATTERN.match(repo):
+        raise ValueError("Repo must look like owner/name")
+
+    limit = max(1, min(limit, 30))
+    github_api = os.environ.get("GITHUB_API")
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{github_api}/repos/{repo}/issues",
+            headers=github_headers(),
+            params={"state": "open", "per_page": limit},
+        )
+        resp.raise_for_status()
+    return [
+        f"#{i['number']} {i['title']} (by {i['user']['login']})"
+        for i in resp.json()
+        if "pull_request" not in i
+    ]
 
 
 @mcp.tool()

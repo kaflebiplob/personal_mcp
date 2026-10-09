@@ -32,5 +32,9 @@ async def main():
             await call(session, "delete_note", {"note_id": 1})
             await call(session, "list_notes", {})
 
+            await call(session, "list_repos", {})
+            await call(session, "list_issues", {"repo": "kaflebiplob"})
+            await call(session, "list_issues", {"repo": "kaflebiplob/ecommerce_py"})
+
 
 asyncio.run(main())
