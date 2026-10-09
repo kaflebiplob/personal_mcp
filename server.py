@@ -18,12 +18,14 @@ load_dotenv(Path(__file__).parent / ".env")
 
 # This function is to protect from AI (Which can automatically delete notes)
 
-READ_ONLY = os.environ.get("MCP_READ_ONLY","").lower() in {"1","true","yes"}
+READ_ONLY = os.environ.get("MCP_READ_ONLY", "").lower() in {"1", "true", "yes"}
 
-def require_write()->None:
+
+def require_write() -> None:
     """Call at the start of any tool that change data."""
     if READ_ONLY:
         raise PermissionError("Server is in read-only mode.")
+
 
 mcp = FastMCP("personal-mcp")
 
@@ -111,7 +113,7 @@ def logged(fn):
                 )
                 raise
             audit.info(
-                "ok %s(%s) %0fms",
+                "ok %s(%s) %.0fms",
                 fn.__name__,
                 describe(args, kwargs),
                 (time.perf_counter() - start) * 1000,
@@ -167,7 +169,13 @@ def add(a: float, b: float) -> float:
 @mcp.tool()
 @logged
 def list_files(subdir: str = ".") -> list[str]:
-    """List files and folders in the workspace (or a subfolder of it)."""
+    """List files and folders inside the workspace. Folders end with "/".
+
+    Use this first to see what exists before reading a file.
+
+    Args:
+        subdir: Folder inside the workspace, e.g. "notes". "." means the top level.
+    """
     base = safe_path(subdir)
     if not base.is_dir():
         raise ValueError(f"Not a folder: {subdir}")
@@ -180,7 +188,12 @@ def list_files(subdir: str = ".") -> list[str]:
 @mcp.tool()
 @logged
 def read_file(path: str) -> str:
-    """Read a text file from the workspace."""
+    """Read one text file from the workspace and return its contents.
+
+    Args:
+        path: Path relative to the workspace, e.g. "notes/todo.md".
+            If unsure of the path, call list_files first.
+    """
     file = safe_path(path)
     if not file.is_file():
         raise ValueError(f"Not a file: {path}")
@@ -192,7 +205,14 @@ def read_file(path: str) -> str:
 @mcp.tool()
 @logged
 def search_text(query: str, subdir: str = ".") -> list[str]:
-    """Search text files in the workspace for a word or phrase (case-insensitive)."""
+    """Search text files in the workspace for a word or phrase (case-insensitive).
+
+    Returns matching lines as "file:line: text".
+
+    Args:
+        query: The word or phrase to look for.
+        subdir: Optional folder to limit the search.
+    """
     base = safe_path(subdir)
     q = query.lower()
     results: list[str] = []
@@ -218,7 +238,15 @@ def search_text(query: str, subdir: str = ".") -> list[str]:
 @mcp.tool()
 @logged
 def add_note(content: str) -> str:
-    """Save a note to personal memory."""
+    """Save a short note to the user's personal notes database.
+
+    Use when the user says "remember", "save a note", or wants information kept for later.
+
+    Args:
+        content: The text to save (max 5000 characters).
+    Returns the id of the new note.
+    """
+    require_write()
     content = content.strip()
     if not content:
         raise ValueError("Note is empty")
@@ -234,7 +262,11 @@ def add_note(content: str) -> str:
 @mcp.tool()
 @logged
 def list_notes(limit: int = 20) -> list[str]:
-    """List the most recent notes (newest note first)"""
+    """List the user's most recent saved notes, newest first.
+
+    Args:
+        limit: How many notes to return (1 to 100).
+    """
     limit = max(1, min(limit, 100))
     with db() as conn:
         rows = conn.execute(
@@ -247,7 +279,13 @@ def list_notes(limit: int = 20) -> list[str]:
 @mcp.tool()
 @logged
 def search_notes(query: str) -> list[str]:
-    """Search saved notes for a word or phrase."""
+    """Search the user's saved notes for a word or phrase (case-insensitive).
+
+    Use when the user asks what they saved or wrote about something.
+
+    Args:
+        query: The word or phrase to look for.
+    """
     with db() as conn:
         rows = conn.execute(
             "SELECT id, content, created_at FROM notes "
@@ -260,7 +298,14 @@ def search_notes(query: str) -> list[str]:
 @mcp.tool()
 @logged
 def delete_note(note_id: int) -> str:
-    """Delete a note  by its id number."""
+    """Permanently delete one saved note.
+
+    Only use this when the user clearly asks to delete a specific note.
+    Call list_notes or search_notes first to find its id.
+
+    Args:
+        note_id: The number after "#" in the note list.
+    """
     require_write()
     with db() as conn:
         cur = conn.execute("DELETE FROM notes WHERE id = %s", (note_id,))
@@ -283,7 +328,11 @@ def github_headers() -> dict[str, str]:
 @mcp.tool()
 @logged
 async def list_repos(limit: int = 20) -> list[str]:
-    """List Github repositories the token can access."""
+    """List the user's GitHub repositories that the access token can see, most recently updated first.
+
+    Args:
+        limit: How many repos to return (1 to 50).
+    """
     limit = max(1, min(limit, 50))
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
@@ -302,7 +351,12 @@ async def list_repos(limit: int = 20) -> list[str]:
 @mcp.tool()
 @logged
 async def list_issues(repo: str, limit: int = 10) -> list[str]:
-    """List open issues in a Github repo. Use the owner name"""
+    """List open issues in one GitHub repository (pull requests are excluded).
+
+    Args:
+        repo: Repository in owner/name format, e.g. "kaflebiplob/ecommerce_py".
+        limit: How many issues to return (1 to 30).
+    """
     if not REPO_PATTERN.match(repo):
         raise ValueError("Repo must look like owner/name")
 
