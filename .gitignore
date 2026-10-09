@@ -1,3 +1,11 @@
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info
+.venv/
+
 memory.db
 memory.db*
 .env
+logs/
