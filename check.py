@@ -10,6 +10,7 @@ async def call(session, name, args):
     text = " | ".join(c.text for c in result.content)
     status = "ERROR" if result.isError else "ok"
     print(f"[{status}] {name}({args})\n    -> {text}\n")
+    return result
 
 
 async def main():
@@ -26,10 +27,11 @@ async def main():
             await call(session, "read_file", {"path": "../pyproject.toml"})
             await call(session, "read_file", {"path": "/etc/passwd"})
 
-            await call(session, "add_note", {"content": "My first note"})
+            saved = await call(session, "add_note", {"content": "My first note"})
+            note_id = int(saved.content[0].text.split("#")[1])
             await call(session, "list_notes", {})
             await call(session, "search_notes", {"query": "first"})
-            await call(session, "delete_note", {"note_id": 1})
+            await call(session, "delete_note", {"note_id": note_id})
             await call(session, "list_notes", {})
 
             await call(session, "list_repos", {})

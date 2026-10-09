@@ -1,10 +1,11 @@
 import os
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
-import sqlite3
-from contextlib import closing
 import httpx
 import re
+import psycopg
+from psycopg.rows import dict_row
+
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
@@ -33,23 +34,30 @@ TEXT_SUFFIXES = {
 MAX_NOTE_CHARS = 5000
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
-DB_PATH = Path(__file__).parent / "memory.db"
+
+def db() -> psycopg.Connection:
+    url = os.environ.get("MCP_DATABASE_URL")
+    if not url:
+        raise ValueError("DATABASE URL is not set please check .env file")
+    return psycopg.connect(url, row_factory=dict_row, connect_timeout=5)
 
 
-def db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-with db() as conn:
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS notes(
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            content    TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
+def init_db() -> None:
+    with db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS notes (
+                id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                content    TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
         """)
+
+
+def format_note(r) -> str:
+    return f"#{r['id']} [{r['created_at']:%Y-%m-%d %H:%M}] {r['content']}"
+
+
+init_db()
 
 
 def safe_path(relative: str) -> Path:
@@ -128,40 +136,42 @@ def add_note(content: str) -> str:
         raise ValueError("Note is empty")
     if len(content) > MAX_NOTE_CHARS:
         raise ValueError(f"Note too long(max {MAX_NOTE_CHARS} characters)")
-    with closing(db()) as conn, conn:
-        cur = conn.execute("INSERT INTO notes (content) VALUES (?)", (content,))
-        return f"Saved note #{cur.lastrowid}"
+    with db() as conn:
+        row = conn.execute(
+            "INSERT INTO notes (content) VALUES (%s) RETURNING id", (content,)
+        ).fetchone()
+    return f"Saved note #{row['id']}"
 
 
 @mcp.tool()
 def list_notes(limit: int = 20) -> list[str]:
     """List the most recent notes (newest note first)"""
     limit = max(1, min(limit, 100))
-    with closing(db()) as conn:
+    with db() as conn:
         rows = conn.execute(
-            "SELECT id, content, created_at FROM notes ORDER BY id DESC LIMIT ?",
+            "SELECT id, content, created_at FROM notes ORDER BY id DESC LIMIT %s",
             (limit,),
         ).fetchall()
-    return [f"#{r['id']} [{r['created_at']}] {r['content']}" for r in rows]
+    return [format_note(r) for r in rows]
 
 
 @mcp.tool()
 def search_notes(query: str) -> list[str]:
     """Search saved notes for a word or phrase."""
-    with closing(db()) as conn:
+    with db() as conn:
         rows = conn.execute(
-            "SELECT id,content,created_at FROM notes "
-            "WHERE content LIKE ? ORDER BY id DESC LIMIT 50",
+            "SELECT id, content, created_at FROM notes "
+            "WHERE content ILIKE %s ORDER BY id DESC LIMIT 50",
             (f"%{query}%",),
         ).fetchall()
-    return [f"#{r['id']} [{r['created_at']}] {r['content']}" for r in rows]
+    return [format_note(r) for r in rows]
 
 
 @mcp.tool()
 def delete_note(note_id: int) -> str:
     """Delete a note  by its id number."""
-    with closing(db()) as conn, conn:
-        cur = conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    with db() as conn:
+        cur = conn.execute("DELETE FROM notes WHERE id = %s", (note_id,))
         if cur.rowcount == 0:
             raise ValueError(f"No note with id {note_id}")
     return f"Deleted note #{note_id}"
