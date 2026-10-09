@@ -1,7 +1,8 @@
 import os
 from pathlib import Path
-
 from mcp.server.fastmcp import FastMCP
+import sqlite3
+from contextlib import closing
 
 mcp = FastMCP("personal-mcp")
 
@@ -24,11 +25,30 @@ TEXT_SUFFIXES = {
     ".yaml",
     ".yml",
 }
+MAX_NOTE_CHARS = 5000
+
+DB_PATH = Path(__file__).parent / "memory.db"
+
+
+def db() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+with db() as conn:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notes(
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            content    TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
 
 
 def safe_path(relative: str) -> Path:
     """Turn a user-given path into a real path, refusing anything outside WORKSPACE."""
-    candidate = (WORKSPACE / relative).resolve()  # resolves ../ and symlinks
+    candidate = (WORKSPACE / relative).resolve()
     if not candidate.is_relative_to(WORKSPACE):
         raise ValueError("Path is outside the authorized workspace")
     return candidate
@@ -92,6 +112,19 @@ def search_text(query: str, subdir: str = ".") -> list[str]:
                 if len(results) >= MAX_RESULTS:
                     return results
     return results
+
+
+@mcp.tool()
+def add_notes(content: str) -> str:
+    """Save a note to personal memory."""
+    content = content.strip()
+    if not content:
+        raise ValueError("Note is empty")
+    if len(content) > MAX_NOTE_CHARS:
+        raise ValueError(f"Note too long(max {MAX_NOTE_CHARS} characters)")
+    with closing(db()) as conn, conn:
+        cur = conn.execute("INSERT INTO notes (content) VALUES (?)", (content,))
+        return f"Saved note #{cur.lastrowid}"
 
 
 if __name__ == "__main__":
