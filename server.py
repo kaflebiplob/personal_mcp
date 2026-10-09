@@ -3,6 +3,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 import sqlite3
 from contextlib import closing
+import httpx
 
 mcp = FastMCP("personal-mcp")
 
@@ -159,6 +160,39 @@ def delete_note(note_id: int) -> str:
         if cur.rowcount == 0:
             raise ValueError(f"No note with id {note_id}")
     return f"Deleted note #{note_id}"
+
+
+@mcp.tool()
+async def get_weather(city: str) -> str:
+    """Get the current weather for a city (uses the free open-meteo service)."""
+    city = city.strip()
+    if not city:
+        raise ValueError("City is empty")
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        geo = await client.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": city, "count": 1},
+        )
+        geo.raise_for_status()
+        results = geo.json().get("results")
+        if not results:
+            raise ValueError(f"City not found: {city}")
+        place = results[0]
+        weather = await client.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": place["latitude"],
+                "longitude": place["longitude"],
+                "current": "temperature_2m,wind_speed_10m",
+            },
+        )
+        weather.raise_for_status()
+        current = weather.json()["current"]
+    return (
+        f"{place['name']}, {place.get('country', '')}: "
+        f"{current['temperature_2m']}°C, wind {current['wind_speed_10m']} km/h"
+    )
 
 
 if __name__ == "__main__":
